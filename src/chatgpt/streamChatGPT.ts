@@ -39,15 +39,14 @@ export const streamChatGPT = async (messages: Message[]) => {
 
   const stream = new ReadableStream<string>({
     async start(controller) {
-      const read = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
         const { done, value } = await reader.read();
-        if (done) return;
+        if (done) break;
         const decoded = decoder.decode(value);
         const parsed = parser(decoded);
         controller.enqueue(parsed);
-        await read(reader);
-      };
-      await read(reader);
+      }
       controller.close();
     },
   });
