@@ -37,7 +37,29 @@ const replaceMention = (message: Message) => {
       `@${user.username}`,
     );
   });
-}
+};
+
+const createHistory = async (channel: AnyThreadChannel) => {
+  const chatMessage: ChatMessage[] = [];
+  const messages = await channel.messages.fetch();
+  messages.forEach((message) => {
+    removeMention(message);
+    replaceMention(message);
+    if (message.content === "") return;
+    if (message.author.id === me?.id) {
+      chatMessage.unshift({
+        role: "assistant",
+        content: message.content,
+      });
+    } else if (!message.author.bot) {
+      chatMessage.unshift({
+        role: "user",
+        content: message.content,
+      });
+    }
+  });
+  return chatMessage;
+};
 
 const sendAnswer = async (
   channel: TextChannel | AnyThreadChannel,
@@ -71,23 +93,34 @@ const sendAnswer = async (
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot) return;
+  let chatMessage: ChatMessage[] | null = null;
+  let threadChannel: AnyThreadChannel | null = null;
   if (message.channel.isThread()) {
-    await message.channel.send("Hello from a thread!");
-    return;
-  }
-  if (message.channel.type !== ChannelType.GuildText) return;
-  if (!isMentioned(message)) return;
-  removeMention(message);
-  replaceMention(message);
-  const threadChannel = await message.startThread({
-    name: message.content.slice(0, 100),
-  });
-  const chatMessage: ChatMessage[] = [
-    {
+    const starterMessage = await message.channel.fetchStarterMessage();
+    if (!starterMessage || !isMentioned(starterMessage)) return;
+    removeMention(starterMessage);
+    replaceMention(starterMessage);
+    chatMessage = await createHistory(message.channel);
+    chatMessage.unshift({
       role: "user",
-      content: message.content,
-    },
-  ];
+      content: starterMessage.content,
+    });
+    threadChannel = message.channel;
+  } else if (message.channel.type === ChannelType.GuildText) {
+    if (!isMentioned(message)) return;
+    removeMention(message);
+    replaceMention(message);
+    threadChannel = await message.startThread({
+      name: message.content.slice(0, 100),
+    });
+    chatMessage = [
+      {
+        role: "user",
+        content: message.content,
+      },
+    ];
+  }
+  if (!threadChannel || !chatMessage) return;
   await sendAnswer(threadChannel, chatMessage);
 });
 
