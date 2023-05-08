@@ -3,23 +3,21 @@ export type Message = {
   content: string;
 };
 
-type ParseResult = {
-  content: string;
-  isDone: boolean;
-};
-
 const decoder = new TextDecoder();
 
-const parser = (decoded: string): null | ParseResult => {
-  if (!decoded.startsWith("data:")) return null;
-  const received = decoded.slice(5).trim();
-  if (received === "[DONE]") return { content: "", isDone: true };
-  const receivedJSON = JSON.parse(received);
-  const delta = receivedJSON.choices[0].delta;
-  if ("assistant" in delta) return null;
-  if (!("content" in delta)) return null;
-  const content = delta.content;
-  return { content, isDone: false };
+const parser = (decoded: string): string => {
+  let result = "";
+  for (const line of decoded.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const trimmed = line.slice(5).trim();
+    if (trimmed === "[DONE]") break;
+    const parsed = JSON.parse(trimmed);
+    const delta = parsed.choices[0].delta;
+    if ("assistant" in delta) continue;
+    if (!("content" in delta)) continue;
+    result += delta.content;
+  }
+  return result
 };
 
 export const streamChatGPT = async (messages: Message[]) => {
@@ -41,18 +39,15 @@ export const streamChatGPT = async (messages: Message[]) => {
 
   const stream = new ReadableStream<string>({
     async start(controller) {
-      for (;;) {
+      const read = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
         const { done, value } = await reader.read();
-        if (done) break;
-        if (!value) continue;
+        if (done) return;
         const decoded = decoder.decode(value);
-        for (const line of decoded.split("\n")) {
-          const parsed = parser(line);
-          if (!parsed) continue;
-          if (parsed.isDone) break;
-          controller.enqueue(parsed.content);
-        }
-      }
+        const parsed = parser(decoded);
+        controller.enqueue(parsed);
+        await read(reader);
+      };
+      await read(reader);
       controller.close();
     },
   });
